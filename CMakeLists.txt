@@ -17,6 +17,11 @@ qt_add_executable(QtPythonDemo
     frontend/main.cpp
 )
 
+# QML modules are generated into <build>/qml/<URI>.  Without this the module
+# folder would be <build>/QtPythonDemo, the same name as the Linux executable
+# ("ld: cannot open output file QtPythonDemo: Is a directory").
+set(QT_QML_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/qml)
+
 # The QML UI plus the C++ types it uses.  `Backend` (backend.h) carries
 # QML_ELEMENT, so it must be listed here (SOURCES of the QML module) for Qt to
 # generate its QML registration.
@@ -44,3 +49,20 @@ set_target_properties(QtPythonDemo PROPERTIES
     WIN32_EXECUTABLE TRUE            # GUI app: no console window
     MACOSX_BUNDLE TRUE
 )
+
+# ---- deployment: `cmake --install <build> --prefix <dir>` copies the exe and
+# everything of Qt it needs (libraries, plugins, QML modules) into <dir>, using
+# Qt's own deployment API.  tools/package.py uses this on Linux and macOS; on
+# Windows it calls windeployqt directly, which is what this does under the hood.
+include(GNUInstallDirs)
+install(TARGETS QtPythonDemo
+    BUNDLE  DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+qt_generate_deploy_qml_app_script(
+    TARGET QtPythonDemo
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+    NO_TRANSLATIONS
+)
+install(SCRIPT ${deploy_script})

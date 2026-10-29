@@ -30,22 +30,48 @@ Backend::~Backend()
 
 QStringList Backend::locate()
 {
-    const QDir appDir(QCoreApplication::applicationDirPath());
+    // The bundle layout differs per platform (see tools/package.py):
+    //   Windows:  <bundle>/QtPythonDemo.exe            backend/ is next to the exe
+    //   Linux:    <bundle>/bin/QtPythonDemo            backend/ is one level up
+    //   macOS:    <bundle>.app/Contents/MacOS/...      backend/ in Contents/Resources
+    const QString appDir = QCoreApplication::applicationDirPath();
+    const QStringList bases = { appDir, appDir + "/..", appDir + "/../Resources" };
+#ifdef Q_OS_WIN
+    const QString privatePython = "backend/python/python.exe";
+    const QStringList pathNames = { "python", "python3" };
+#else
+    const QString privatePython = "backend/python/bin/python3";
+    const QStringList pathNames = { "python3", "python" };
+#endif
 
-    // 1. packaged bundle: our own embeddable Python next to the exe
-    const QString bundledPy = appDir.filePath("backend/python/python.exe");
-    const QString bundledScript = appDir.filePath("backend/backend.py");
-    if (QFileInfo::exists(bundledPy) && QFileInfo::exists(bundledScript))
-        return { bundledPy, "-u", bundledScript };
+    // 1. packaged bundle: our own private Python + our script
+    for (const QString &base : bases) {
+        const QDir d(base);
+        const QString py = d.filePath(privatePython);
+        const QString script = d.filePath("backend/backend.py");
+        if (QFileInfo::exists(py) && QFileInfo::exists(script))
+            return { QDir::cleanPath(py), "-u", QDir::cleanPath(script) };
+    }
 
-    // 2. backend folder next to the exe, Python from PATH
-    const QString python = QStandardPaths::findExecutable("python");
-    if (!python.isEmpty() && QFileInfo::exists(bundledScript))
-        return { python, "-u", bundledScript };
+    QString python;
+    for (const QString &name : pathNames) {
+        python = QStandardPaths::findExecutable(name);
+        if (!python.isEmpty())
+            break;
+    }
+    if (python.isEmpty())
+        return {};
+
+    // 2. backend folder in the bundle, Python from PATH
+    for (const QString &base : bases) {
+        const QString script = QDir(base).filePath("backend/backend.py");
+        if (QFileInfo::exists(script))
+            return { python, "-u", QDir::cleanPath(script) };
+    }
 
     // 3. development: the source tree (path baked in by CMake)
     const QString devScript = QDir(QString::fromUtf8(DEMO_SOURCE_DIR)).filePath("backend/backend.py");
-    if (!python.isEmpty() && QFileInfo::exists(devScript))
+    if (QFileInfo::exists(devScript))
         return { python, "-u", devScript };
 
     return {};
@@ -59,7 +85,7 @@ void Backend::start()
         return;
     const QStringList cmd = locate();
     if (cmd.isEmpty()) {
-        setState("error", "no Python back end found (backend/python/python.exe or python on PATH)");
+        setState("error", "no Python back end found (backend/python/ in the bundle, or python3 on PATH)");
         return;
     }
     m_command = cmd.join(' ');

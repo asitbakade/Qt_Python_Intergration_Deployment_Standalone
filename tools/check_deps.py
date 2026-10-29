@@ -1,18 +1,24 @@
-"""Release check of the Windows bundle: every DLL that any program file in
-it imports is either in the package or part of Windows itself.
+"""Release check of the bundle: every shared library that any program file in
+it needs is either inside the bundle or part of the operating system.
 
-    python tools/check_deps.py dist/QtPythonDemo
+    python tools/check_deps.py dist/QtPythonDemo        (any OS; used by package.py)
 
-Reads the import table of each .exe / .dll / .pyd (a small PE reader, no
-third-party module) and fails when something would only load thanks to a
+Windows: reads the import table of each .exe / .dll / .pyd (a small PE reader,
+no third-party module) and fails when something would only load thanks to a
 library installed on the build machine - e.g. torch's MSVCP140.dll /
 VCRUNTIME140_THREADS.dll, which come from the Visual C++ Redistributable and
-are not on a fresh Windows. Windows' own DLLs (kernel32, api-ms-win-*, …)
+are not on a fresh Windows.  Windows' own DLLs (kernel32, api-ms-win-*, ...)
 are allowed; anything else must travel with the package.
+
+Linux: runs `ldd` on every ELF file (executables, .so) and fails on any
+"not found".  Libraries resolved from the system (libc, libGL, libxcb-*, ...)
+are listed for information: they must exist on the target distribution too.
 """
 from __future__ import annotations
 
+import os
 import struct
+import subprocess
 import sys
 from pathlib import Path
 
@@ -114,8 +120,51 @@ def resolves(name: str, p: Path, dist: Path) -> bool:
     return False
 
 
-def main(argv: list[str]) -> int:
-    dist = Path(argv[1] if len(argv) > 1 else "dist/QtPythonDemo").resolve()
+# ----------------------------------------------------------------------- Linux
+
+def is_elf(p: Path) -> bool:
+    try:
+        with open(p, "rb") as f:
+            return f.read(4) == b"ELF"
+    except OSError:
+        return False
+
+
+def check_linux(dist: Path) -> int:
+    files = [p for p in dist.rglob("*") if p.is_file() and not p.is_symlink()
+             and (".so" in p.suffixes or p.suffix == "" or p.suffix.startswith(".so")) and is_elf(p)]
+    missing: dict[str, set[str]] = {}
+    system: dict[str, set[str]] = {}
+    for p in files:
+        out = subprocess.run(["ldd", str(p)], capture_output=True, text=True, env={**os.environ, "LANG": "C"})
+        for line in out.stdout.splitlines():
+            if "=>" not in line:
+                continue                                  # the vdso and the ELF loader itself
+            name, _, where = line.strip().partition("=>")
+            name, where = name.strip(), where.strip()
+            rel = str(p.relative_to(dist))
+            if where.startswith("not found"):
+                missing.setdefault(name, set()).add(rel)
+            elif not where.split(" ")[0].startswith(str(dist)):
+                system.setdefault(name, set()).add(rel)
+    print(f"{len(files)} ELF files in {dist}")
+    if system:
+        names = sorted(system)
+        print(f"{len(names)} libraries come from the operating system (the target distribution must have them):")
+        print("  " + ", ".join(names))
+    if not missing:
+        print("OK: every other library is found inside the bundle (rpath / plugin folders)")
+        return 0
+    print(f"FAIL: {len(missing)} libraries are not found anywhere:")
+    for n in sorted(missing):
+        users = sorted(missing[n])
+        print(f"  {n}  <- {', '.join(users[:3])}{' ...' if len(users) > 3 else ''} ({len(users)} files)")
+    return 1
+
+
+# --------------------------------------------------------------------- Windows
+
+def check_windows(dist: Path) -> int:
     files = [p for p in dist.rglob("*") if p.suffix.lower() in (".exe", ".dll", ".pyd")]
     missing: dict[str, set[str]] = {}
     for p in files:
@@ -137,6 +186,16 @@ def main(argv: list[str]) -> int:
         users = sorted(missing[n])
         print(f"  {n}.dll  <- {', '.join(users[:3])}{' ...' if len(users) > 3 else ''} ({len(users)} files)")
     return 1
+
+
+def main(argv: list[str]) -> int:
+    dist = Path(argv[1] if len(argv) > 1 else "dist/QtPythonDemo").resolve()
+    if sys.platform == "win32":
+        return check_windows(dist)
+    if sys.platform == "darwin":
+        print("macOS: no dependency check implemented (use `otool -L` on the .app); skipping")
+        return 0
+    return check_linux(dist)
 
 
 if __name__ == "__main__":

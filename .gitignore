@@ -1,15 +1,9 @@
-# build output and bundles
 build/
 dist/
 *.zip
-
-# Qt Creator / IDE
+*.tar.gz
 CMakeLists.txt.user*
-.vscode/
-.idea/
-
-# Python
 __pycache__/
 *.pyc
-.venv/
 backend/python/
+aqtinstall.log

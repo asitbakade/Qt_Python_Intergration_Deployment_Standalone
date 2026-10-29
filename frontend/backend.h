@@ -20,10 +20,11 @@
  *   backend.call("add", { a: 2, b: 3 })
  *   onReplied: (id, method, result) => ...
  *
- * Where the Python comes from (locate()):
- *   1. <app dir>/backend/python/python.exe  <app dir>/backend/backend.py   - the packaged bundle
- *   2. python  <app dir>/backend/backend.py                                - bundle without its own Python
- *   3. python  <source dir>/backend/backend.py                             - development (Qt Creator)
+ * Where the Python comes from (locate()), <bundle> = the exe's folder on Windows,
+ * one level above bin/ on Linux, Contents/Resources on macOS:
+ *   1. <bundle>/backend/python/{python.exe | bin/python3}  <bundle>/backend/backend.py  - the packaged bundle
+ *   2. python(3) from PATH  <bundle>/backend/backend.py                                - bundle without its own Python
+ *   3. python(3) from PATH  <source dir>/backend/backend.py                            - development (Qt Creator)
  */
 class Backend : public QObject
 {
